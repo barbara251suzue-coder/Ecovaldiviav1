@@ -1,0 +1,41 @@
+# Despliegue de EcoValdivia en Render (Blueprint).
+#
+# Pasos: subir el repositorio a GitHub, en Render elegir "New > Blueprint" y
+# apuntar a este archivo. Render instala las dependencias, crea la base Postgres
+# y entrega HTTPS automático en https://<nombre>.onrender.com
+#
+# run.py crea las tablas y carga los datos de demostración al arrancar
+# (idempotente), por lo que no hace falta Shell ni ejecutar python seed.py a mano.
+services:
+  - type: web
+    name: ecovaldivia-v1
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    # Un solo worker: la entrega no soporta workers concurrentes por dispositivo.
+    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 60
+    # /salud no consulta la base: el servicio pasa el chequeo aunque todavía no
+    # se hayan cargado datos (python seed.py se ejecuta después del despliegue).
+    healthCheckPath: /salud
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # Render genera una clave estable: las sesiones sobreviven a los reinicios.
+      - key: SECRET_KEY
+        generateValue: true
+      # Cookies de sesión solo por HTTPS (Render ya sirve TLS).
+      - key: SESSION_COOKIE_SECURE
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ecovaldivia-v1-db
+          property: connectionString
+
+databases:
+  - name: ecovaldivia-v1-db
+    plan: free
+    databaseName: ecovaldivia
+    user: ecovaldivia

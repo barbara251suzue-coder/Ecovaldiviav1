@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% from '_visual.html' import icon, badge, progress %}
+{% block title %}Panel privado · EcoValdivia{% endblock %}
+{% block content %}
+<div class="page-heading">
+<div><p class="eyebrow mb-2">Operaciones · {{ current_user.rol }}</p><h1>Panel operacional</h1><p>Hola, {{ current_user.nombre }}. Así están los contenedores de nuestra ciudad.</p></div>
+<div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-success" href="{{ url_for('operacion.alertas') }}">Alertas</a>
+    <a class="btn btn-outline-success" href="{{ url_for('operacion.historial') }}">Historial operacional</a>
+</div>
+</div>
+{% set resumen = [
+    ('puntos', 'Total de puntos', contenedores|groupby('punto')|list|length, 'mapa', 'Representados en el panel'),
+    ('disponibles', 'Contenedores disponibles', contenedores|selectattr('estado', 'equalto', 'Disponible')|list|length, 'hoja', 'Activos con estado «Disponible»: llenado menor al 50%. Según el último estado registrado, incluso con el dispositivo offline.'),
+    ('criticos', 'Casi llenos / llenos', (contenedores|selectattr('estado', 'equalto', 'Casi lleno')|list|length) + (contenedores|selectattr('estado', 'equalto', 'Lleno')|list|length), 'material', 'Contenedores por revisar'),
+    ('alertas', 'Alertas activas', contenedores|selectattr('alerta')|list|length, 'alerta', 'Contenedores con alerta'),
+    ('online', 'Dispositivos online', contenedores|selectattr('conectividad', 'equalto', 'ONLINE')|list|length, 'sensor', 'Actividad reciente')
+] %}
+<div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-3 mb-4">
+{% for clave, titulo, valor, simbolo, nota in resumen %}
+    <div class="col"><article class="card metric-card h-100"><div class="card-body">
+        <span class="icon-tile">{{ icon(simbolo) }}</span>
+        <p class="metric-value" id="resumen-{{ clave }}" aria-describedby="resumen-{{ clave }}-titulo resumen-{{ clave }}-nota">{{ valor }}</p>
+        <h2 class="metric-label" id="resumen-{{ clave }}-titulo">{{ titulo }}</h2><p class="metric-note mb-0" id="resumen-{{ clave }}-nota">{{ nota }}</p>
+    </div></article></div>
+{% endfor %}
+</div>
+{% if camara %}
+<section class="card camera-card mb-4">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <h2 class="h5 mb-1">{{ icon('camara') }} Cámara en vivo</h2>
+                <p class="small text-secondary mb-0">{{ camara.nombre }}</p>
+            </div>
+            <button class="btn btn-sm btn-lime btn-ver-camara" type="button" data-punto-id="{{ camara.punto_id }}">{{ icon('camara') }} Ver Cámara en Vivo</button>
+        </div>
+    </div>
+</section>
+{% endif %}
+{% set cantidad_alertas = contenedores|selectattr('alerta')|list|length %}
+<div id="panel-alertas-aviso" class="alert-summary {{ 'alert-summary-active' if cantidad_alertas else '' }} mb-4" role="status" aria-live="polite">
+    {{ icon('alerta') }}
+    <strong id="panel-alertas-texto">{{ cantidad_alertas }} {{ 'contenedor con alerta activa' if cantidad_alertas == 1 else 'contenedores con alerta activa' }}</strong>
+    <a class="btn btn-outline-danger btn-sm" href="{{ url_for('operacion.alertas', estado='activas') }}">Revisar alertas activas</a>
+</div>
+<section id="panel-operacional" class="mt-4" data-endpoint="{{ url_for('auth.panel_datos') }}" data-intervalo="{{ intervalo_panel_ms }}">
+    <h2 class="h4">Contenedores</h2>
+    <p id="panel-actualizacion" class="text-secondary" role="status">Actualización automática cada {{ intervalo_panel_ms // 1000 }} segundos. Fechas en hora local de Chile.</p>
+    <div class="card table-card"><div class="table-responsive">
+    <table class="table table-striped align-middle"><caption class="visually-hidden">Estado actual de los contenedores; actualización automática</caption>
+        <thead><tr><th>Código</th><th>Punto</th><th>Porcentaje</th><th>Estado</th><th>Modo</th><th>Compuerta</th><th>Última actualización</th><th>Alerta activa</th><th>Conectividad</th></tr></thead>
+        <tbody id="panel-contenedores">
+        {% for contenedor in contenedores %}
+        <tr class="{{ 'alert-active' if contenedor.alerta else '' }}">
+            <td>{{ contenedor.codigo }}</td><td>{{ contenedor.punto }}</td>
+            <td>{% if contenedor.porcentaje is not none %}{{ '%.1f'|format(contenedor.porcentaje) }}%{% else %}Sin datos{% endif %}{{ progress(contenedor.porcentaje, contenedor.estado) }}</td>
+            <td>{{ badge(contenedor.estado) }}</td>
+            <td>{{ contenedor.modo or 'Sin datos' }}</td><td>{{ contenedor.compuerta or 'Sin datos' }}</td>
+            <td>{{ contenedor.ultima_actualizacion|fecha_chile }}</td>
+            <td>{% if contenedor.alerta %}<span class="badge status-badge state-lleno">{{ contenedor.alerta }}</span>{% else %}Sin alerta{% endif %}</td>
+            <td><span class="badge status-badge {{ 'state-disponible' if contenedor.conectividad == 'ONLINE' else 'state-neutral' }}">{{ contenedor.conectividad }}</span></td>
+        </tr>
+        {% else %}<tr><td colspan="9">No hay contenedores activos.</td></tr>{% endfor %}
+        </tbody>
+    </table>
+    </div></div>
+</section>
+{% if camara %}
+<div id="modal-camara" class="camara-modal" hidden>
+    <div class="camara-modal-caja" role="dialog" aria-modal="true" aria-labelledby="camara-titulo">
+        <div class="camara-modal-cabecera">
+            <h2 id="camara-titulo" class="h5 mb-0">Cámara en vivo</h2>
+            <button id="btn-cerrar-camara" class="camara-modal-cerrar" type="button" aria-label="Cerrar">×</button>
+        </div>
+        <p id="camara-nombre" class="small text-secondary mb-2"></p>
+        <p id="error-camara" class="camara-error" role="alert"></p>
+        <div id="contenedor-camara" class="camara-contenedor"></div>
+    </div>
+</div>
+{% endif %}
+<script src="{{ url_for('static', filename='js/panel.js') }}" defer></script>
+{% if camara %}
+<script src="{{ url_for('static', filename='js/camara.js') }}" defer></script>
+{% endif %}
+{% endblock %}
